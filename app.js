@@ -258,12 +258,21 @@
   var data = defaultData();
 
   /* ---------- State ---------- */
+  // A budget month runs from day BUDGET_START_DAY of the month until the day before it next month
+  // (e.g. September = 10.9 – 9.10), so dates before the 10th belong to the previous month.
+  var BUDGET_START_DAY = 10;
   var today = new Date();
-  var viewYear = today.getFullYear();
-  var viewMonth = today.getMonth(); // 0-11, "this month" screen
-  var historyYear = today.getFullYear();
-  var historySelectedMonth = today.getMonth()+1; // 1-12
-  var annualYear = today.getFullYear();
+  var budgetNowYear = today.getFullYear();
+  var budgetNowMonth = today.getMonth(); // 0-11
+  if(today.getDate() < BUDGET_START_DAY){
+    budgetNowMonth--;
+    if(budgetNowMonth < 0){ budgetNowMonth = 11; budgetNowYear--; }
+  }
+  var viewYear = budgetNowYear;
+  var viewMonth = budgetNowMonth; // 0-11, "this month" screen
+  var historyYear = budgetNowYear;
+  var historySelectedMonth = budgetNowMonth+1; // 1-12
+  var annualYear = budgetNowYear;
   var currentScreen = "home";
   var currentSub = "fixed";
   var editingFixedId = null;
@@ -281,6 +290,17 @@
   var fmt = new Intl.NumberFormat('he-IL', {maximumFractionDigits:0});
   function money(n){ return "₪" + fmt.format(Math.round(n||0)); }
   function monthKey(y,m){ return y + "-" + String(m+1).padStart(2,"0"); }
+  // "YYYY-MM-DD" -> budget month key "YYYY-MM"
+  function budgetKeyForDate(dateStr){
+    var y = Number(dateStr.slice(0,4)), m = Number(dateStr.slice(5,7)) - 1, d = Number(dateStr.slice(8,10));
+    if(d < BUDGET_START_DAY){ m--; if(m < 0){ m = 11; y--; } }
+    return monthKey(y, m);
+  }
+  function inBudgetMonth(e, key){ return !!e.date && budgetKeyForDate(e.date) === key; }
+  // e.g. "10.9 – 9.10"
+  function budgetRangeLabel(m){
+    return BUDGET_START_DAY + "." + (m+1) + " – " + (BUDGET_START_DAY-1) + "." + ((m+1)%12+1);
+  }
   function escapeHtml(s){ var d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
 
   /* ---------- Toast ---------- */
@@ -311,9 +331,16 @@
   }
 
   /* ---------- Totals ---------- */
-  function fixedTotalForMonth1(m1){
+  // A fixed expense has started by month (y, m1) if it has no startMonth ("YYYY-MM") or that month is on/after it.
+  function fixedStarted(e, y, m1){
+    return !e.startMonth || monthKey(y, m1-1) >= e.startMonth;
+  }
+  function fixedAppliesTo(e, y, m1){
+    return (e.months||ALL_MONTHS).indexOf(m1) !== -1 && fixedStarted(e, y, m1);
+  }
+  function fixedTotalForMonth1(y, m1){
     return data.fixedExpenses
-      .filter(function(e){ return (e.months||ALL_MONTHS).indexOf(m1) !== -1; })
+      .filter(function(e){ return fixedAppliesTo(e, y, m1); })
       .reduce(function(sum,e){ return sum + Number(e.amount||0); }, 0);
   }
   function annualContributionForMonth(y, m1){
@@ -327,13 +354,13 @@
   function variableTotalForMonth(y,m){
     var key = monthKey(y,m);
     return data.variableExpenses
-      .filter(function(e){ return e.date && e.date.slice(0,7) === key; })
+      .filter(function(e){ return inBudgetMonth(e, key); })
       .reduce(function(sum,e){ return sum + Number(e.amount||0); }, 0);
   }
-  function monthTotal(y,m){ return fixedTotalForMonth1(m+1) + annualContributionForMonth(y, m+1) + variableTotalForMonth(y,m); }
+  function monthTotal(y,m){ return fixedTotalForMonth1(y, m+1) + annualContributionForMonth(y, m+1) + variableTotalForMonth(y,m); }
   function monthTotalForCategory(y, m, catId){
     var fixedTot = data.fixedExpenses
-      .filter(function(e){ return e.categoryId===catId && (e.months||ALL_MONTHS).indexOf(m+1) !== -1; })
+      .filter(function(e){ return e.categoryId===catId && fixedAppliesTo(e, y, m+1); })
       .reduce(function(sum,e){ return sum + Number(e.amount||0); }, 0);
     var annualTot = data.annualExpenses
       .filter(function(e){
@@ -344,7 +371,7 @@
       .reduce(function(sum,e){ return sum + Number(e.amount||0); }, 0);
     var key = monthKey(y,m);
     var varTot = data.variableExpenses
-      .filter(function(e){ return e.categoryId===catId && e.date && e.date.slice(0,7)===key; })
+      .filter(function(e){ return e.categoryId===catId && inBudgetMonth(e, key); })
       .reduce(function(sum,e){ return sum + Number(e.amount||0); }, 0);
     return fixedTot + annualTot + varTot;
   }
@@ -397,7 +424,7 @@
   /* ---------- Home tiles stats ---------- */
   function renderHomeStats(){
     var badge = document.getElementById("currentMonthBadge");
-    badge.innerHTML = '<span class="bullet"></span>' + HE_MONTHS[today.getMonth()] + ' ' + today.getFullYear();
+    badge.innerHTML = '<span class="bullet"></span>' + HE_MONTHS[budgetNowMonth] + ' ' + budgetNowYear;
     var remaining = incomeTotalForMonth(viewYear, viewMonth+1) - monthTotal(viewYear, viewMonth);
     var el = document.getElementById("tileMonthStat");
     el.textContent = "נשאר: " + money(remaining);
@@ -411,8 +438,9 @@
 
   /* ---------- This month screen ---------- */
   function renderMonthHeader(){
-    document.getElementById("monthLabel").textContent = HE_MONTHS[viewMonth] + " " + viewYear;
-    var fixedTot = fixedTotalForMonth1(viewMonth+1);
+    document.getElementById("monthLabel").innerHTML = HE_MONTHS[viewMonth] + " " + viewYear +
+      ' <span style="font-size:12px; font-weight:400; opacity:.7; white-space:nowrap;">(' + budgetRangeLabel(viewMonth) + ')</span>';
+    var fixedTot = fixedTotalForMonth1(viewYear, viewMonth+1);
     var annualTot = annualContributionForMonth(viewYear, viewMonth+1);
     var varTot = variableTotalForMonth(viewYear, viewMonth);
     var expenseTot = fixedTot + varTot + annualTot;
@@ -451,7 +479,7 @@
 
   function renderFixed(){
     var list = document.getElementById("fixedList");
-    var items = data.fixedExpenses.slice();
+    var items = data.fixedExpenses.filter(function(e){ return fixedStarted(e, viewYear, viewMonth+1); });
     if(monthCatFilter){ items = items.filter(function(e){ return e.categoryId===monthCatFilter; }); }
     document.getElementById("fixedCount").textContent = items.length ? (items.length + " פריטים") : "";
     if(items.length === 0){
@@ -478,7 +506,7 @@
       html += '<span class="subtotal">'+money(subtotal)+'</span></div>';
       rows.forEach(function(e){
         html += '<div class="row">';
-        html += '<span class="name">'+escapeHtml(e.name)+'<span class="tag">'+monthsLabel(e.months)+'</span></span>';
+        html += '<span class="name">'+escapeHtml(e.name)+'<span class="tag">'+monthsLabel(e.months)+(e.startMonth ? ' · החל מ'+startMonthLabel(e.startMonth) : '')+'</span></span>';
         html += '<span class="amount">'+money(e.amount)+'</span>';
         html += '<span class="actions">';
         html += '<button data-act="edit-fixed" data-id="'+e.id+'" aria-label="עריכה">✎</button>';
@@ -504,13 +532,31 @@
     return html;
   }
 
+  function startMonthLabel(key){
+    return HE_MONTHS[Number(key.slice(5,7))-1] + " " + key.slice(0,4);
+  }
+  // Options from two years before the viewed year through the next year, plus "from the start".
+  function startMonthOptionsHtml(selected){
+    var keys = [];
+    for(var y=viewYear-2; y<=viewYear+1; y++){
+      for(var m=0; m<12; m++){ keys.push(monthKey(y,m)); }
+    }
+    if(selected && keys.indexOf(selected) === -1){ keys.push(selected); keys.sort(); }
+    return '<option value=""'+(selected?'':' selected')+'>מההתחלה (כל התקופה)</option>' +
+      keys.map(function(k){
+        return '<option value="'+k+'"'+(k===selected?' selected':'')+'>'+startMonthLabel(k)+'</option>';
+      }).join("");
+  }
+
   function fixedFormHtml(existing){
     var isEdit = !!existing;
+    var startSel = isEdit ? (existing.startMonth || "") : monthKey(viewYear, viewMonth);
     return '<h3>'+(isEdit? 'עריכת הוצאה קבועה' : 'הוצאה קבועה חדשה')+'</h3>'+
       '<div class="field"><label>שם ההוצאה</label><input type="text" id="fx-name" placeholder="לדוגמה: שכר דירה" value="'+(isEdit?escapeHtml(existing.name):'')+'"></div>'+
       '<div class="field"><label>קטגוריה</label><select id="fx-cat">'+catOptionsHtml(isEdit?existing.categoryId:data.categories[0] && data.categories[0].id)+'</select></div>'+
       '<div class="field"><label>סכום לחודש (₪)</label><input type="number" inputmode="decimal" id="fx-amount" placeholder="0" value="'+(isEdit?existing.amount:'')+'"></div>'+
       '<div class="field"><label>באילו חודשים זה חוזר</label>'+monthsGridHtml(isEdit?existing.months:null)+'</div>'+
+      '<div class="field"><label>החל מחודש</label><select id="fx-start">'+startMonthOptionsHtml(startSel)+'</select></div>'+
       '<div class="form-actions">'+
         (isEdit? '<button class="btn-danger" id="fx-delete" type="button">מחיקה</button>' : '')+
         '<button class="btn-cancel" id="fx-cancel" type="button">ביטול</button>'+
@@ -545,14 +591,18 @@
       var cat = document.getElementById("fx-cat").value;
       var amount = parseFloat(document.getElementById("fx-amount").value);
       var months = readMonthsGrid(card);
+      var startMonth = document.getElementById("fx-start").value;
       if(!name){ showToast("נא להזין שם"); return; }
       if(isNaN(amount) || amount < 0){ showToast("נא להזין סכום תקין"); return; }
       if(months.length === 0){ showToast("נא לבחור לפחות חודש אחד"); return; }
       if(editingFixedId){
         var e = data.fixedExpenses.find(function(x){ return x.id===editingFixedId; });
         e.name=name; e.categoryId=cat; e.amount=amount; e.months=months;
+        if(startMonth) e.startMonth = startMonth; else delete e.startMonth;
       } else {
-        data.fixedExpenses.push({id:uid(), name:name, categoryId:cat, amount:amount, months:months});
+        var item = {id:uid(), name:name, categoryId:cat, amount:amount, months:months};
+        if(startMonth) item.startMonth = startMonth;
+        data.fixedExpenses.push(item);
       }
       save(); closeFixedForm(); renderAll();
       showToast("נשמר");
@@ -577,7 +627,7 @@
     var list = document.getElementById("variableList");
     var key = monthKey(viewYear, viewMonth);
     var items = data.variableExpenses
-      .filter(function(e){ return e.date && e.date.slice(0,7)===key; })
+      .filter(function(e){ return inBudgetMonth(e, key); })
       .filter(function(e){ return !monthCatFilter || e.categoryId===monthCatFilter; })
       .sort(function(a,b){ return b.date.localeCompare(a.date); });
     document.getElementById("variableCount").textContent = items.length ? (items.length + " פריטים") : "";
@@ -591,9 +641,8 @@
     var html = "";
     items.forEach(function(e){
       var cat = getCat(e.categoryId);
-      var day = e.date.slice(8,10);
       html += '<div class="row">';
-      html += '<span class="date">'+day+'/'+String(viewMonth+1).padStart(2,'0')+'</span>';
+      html += '<span class="date">'+e.date.slice(8,10)+'/'+e.date.slice(5,7)+'</span>';
       html += '<span class="name"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+(cat?cat.color:'#999')+';margin-inline-end:6px;"></span>'+escapeHtml(e.name || (cat?cat.name:'הוצאה'))+(e.note?'<span class="note">'+escapeHtml(e.note)+'</span>':'')+'</span>';
       html += '<span class="amount">'+money(e.amount)+'</span>';
       html += '<span class="actions">';
@@ -606,7 +655,11 @@
 
   function variableFormHtml(existing){
     var isEdit = !!existing;
-    var defaultDate = isEdit ? existing.date : (viewYear+"-"+String(viewMonth+1).padStart(2,"0")+"-"+String(Math.min(today.getDate(),28)).padStart(2,"0"));
+    // New expense: today if viewing the current budget month, otherwise the month's first day (the 10th)
+    var isCurrentBudgetMonth = viewYear === budgetNowYear && viewMonth === budgetNowMonth;
+    var defaultDate = isEdit ? existing.date : (isCurrentBudgetMonth
+      ? today.getFullYear()+"-"+String(today.getMonth()+1).padStart(2,"0")+"-"+String(today.getDate()).padStart(2,"0")
+      : monthKey(viewYear, viewMonth)+"-"+String(BUDGET_START_DAY).padStart(2,"0"));
     return '<h3>'+(isEdit? 'עריכת הוצאה' : 'הוצאה משתנה חדשה')+'</h3>'+
       '<div class="field"><label>תיאור</label><input type="text" id="vx-name" placeholder="לדוגמה: סופר, דלק..." value="'+(isEdit?escapeHtml(existing.name||''):'')+'"></div>'+
       '<div class="field"><label>קטגוריה</label><select id="vx-cat">'+catOptionsHtml(isEdit?existing.categoryId:data.categories[0] && data.categories[0].id)+'</select></div>'+
@@ -1050,7 +1103,7 @@
     var byCatBox = document.getElementById("historyByCategory");
     var totalsByCat = {};
     data.fixedExpenses.forEach(function(e){
-      if((e.months||ALL_MONTHS).indexOf(historySelectedMonth) !== -1){
+      if(fixedAppliesTo(e, historyYear, historySelectedMonth)){
         totalsByCat[e.categoryId] = (totalsByCat[e.categoryId]||0) + Number(e.amount||0);
       }
     });
@@ -1062,7 +1115,7 @@
       }
     });
     var key = historyYear + "-" + String(historySelectedMonth).padStart(2,"0");
-    data.variableExpenses.filter(function(e){ return e.date && e.date.slice(0,7)===key; }).forEach(function(e){
+    data.variableExpenses.filter(function(e){ return inBudgetMonth(e, key); }).forEach(function(e){
       totalsByCat[e.categoryId] = (totalsByCat[e.categoryId]||0) + Number(e.amount||0);
     });
     var catIds = Object.keys(totalsByCat).filter(function(id){ return totalsByCat[id] > 0; });
@@ -1162,7 +1215,7 @@
   }
 
   function yearsGridHtml(selectedYears){
-    var sel = selectedYears || [today.getFullYear()];
+    var sel = selectedYears || [budgetNowYear];
     var html = '<div class="months-quick">'+
       '<button type="button" id="yg-all">בחרי הכל</button>'+
       '<button type="button" id="yg-none">נקה בחירה</button></div>'+
@@ -1191,8 +1244,8 @@
   function annualFormHtml(existing){
     var isEdit = !!existing;
     var everyYearDefault = isEdit ? (existing.everyYear !== false) : true;
-    var defaultMonths = isEdit ? existing.months : [today.getMonth()+1];
-    var defaultYears = isEdit && existing.years && existing.years.length ? existing.years : [today.getFullYear()];
+    var defaultMonths = isEdit ? existing.months : [budgetNowMonth+1];
+    var defaultYears = isEdit && existing.years && existing.years.length ? existing.years : [budgetNowYear];
     return '<h3>'+(isEdit? 'עריכת הוצאה שנתית' : 'הוצאה שנתית חדשה')+'</h3>'+
       '<div class="field"><label>שם ההוצאה</label><input type="text" id="an-name" placeholder="לדוגמה: ביטוח רכב" value="'+(isEdit?escapeHtml(existing.name):'')+'"></div>'+
       '<div class="field"><label>קטגוריה</label><select id="an-cat">'+catOptionsHtml(isEdit?existing.categoryId:data.categories[0] && data.categories[0].id)+'</select></div>'+
