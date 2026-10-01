@@ -242,6 +242,8 @@
   .color-picker{ display:flex; flex-wrap:wrap; gap:8px; }
   .color-picker .swatch-btn{ width:26px;height:26px; border-radius:50%; border:2px solid transparent; cursor:pointer; }
   .color-picker .swatch-btn.selected{ border-color:var(--ink); }
+  .color-picker .swatch-custom{ position:relative; overflow:hidden; background:conic-gradient(#E38B6F,#E3C063,#7CBF8E,#5A9FD6,#9481C4,#D98A94,#E38B6F); }
+  .color-picker .swatch-custom input{ position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; border:0; padding:0; }
 
   .cat-row{ display:flex; align-items:center; gap:10px; padding:11px 2px; border-bottom:1px dashed var(--line); }
   .cat-row:last-child{border-bottom:none;}
@@ -495,9 +497,22 @@
 
     <!-- SETTINGS -->
     <section class="screen" id="screen-settings">
+      <nav class="subtabs">
+        <button data-stab="cats" class="active">קטגוריות</button>
+        <button data-stab="home">משק הבית</button>
+        <button data-stab="account">חשבון</button>
+      </nav>
+
+      <div class="subview active" id="stab-cats">
+        <div class="section-head"><h2>קטגוריות</h2><span class="sub" id="catCount"></span></div>
+        <div id="catList"></div>
+        <button class="add-btn" id="btnAddCat">+ קטגוריה חדשה</button>
+        <div class="form-card" id="formCat" style="display:none;"></div>
+      </div>
+
+      <div class="subview" id="stab-home">
       <div class="section-head"><h2>משק הבית</h2></div>
       <div class="form-card" style="margin-top:0;">
-        <div class="field"><label>מחוברת כ</label><div id="settingsEmail" style="font-size:14px; font-weight:600;"></div></div>
         <div class="field">
           <label>קוד הזמנה לבן/בת הזוג</label>
           <div style="display:flex; gap:8px; align-items:center;">
@@ -507,13 +522,16 @@
           <p class="hint">שתפו את הקוד עם בן/בת הזוג כדי שיוכלו להצטרף לאותו תקציב ולראות את אותם נתונים</p>
         </div>
         <div class="field"><label>חברים במשק הבית</label><div id="settingsMembers"></div></div>
-        <button type="button" class="add-btn" id="btnSignOut" style="background:var(--rose);">התנתקי</button>
+      </div>
       </div>
 
-      <div class="section-head" style="margin-top:24px;"><h2>קטגוריות</h2><span class="sub" id="catCount"></span></div>
-      <div id="catList"></div>
-      <button class="add-btn" id="btnAddCat">+ קטגוריה חדשה</button>
-      <div class="form-card" id="formCat" style="display:none;"></div>
+      <div class="subview" id="stab-account">
+        <div class="section-head"><h2>חשבון</h2></div>
+        <div class="form-card" style="margin-top:0;">
+          <div class="field"><label>מחוברת כ</label><div id="settingsEmail" style="font-size:14px; font-weight:600;"></div></div>
+          <button type="button" class="add-btn" id="btnSignOut" style="background:var(--rose);">התנתקי</button>
+        </div>
+      </div>
     </section>
   </main>
 
@@ -737,7 +755,9 @@
 
   /* ---------- Data ---------- */
   var STORAGE_KEY = "homeBudgetData_v3";
-  var DEFAULT_COLORS = ["#5FA98A","#6C93C9","#9481C4","#7C7FCB","#6FB09E","#8CA8D8","#B198D6","#7FA8C4"];
+  var DEFAULT_COLORS = ["#5FA98A","#6C93C9","#9481C4","#7C7FCB","#6FB09E","#8CA8D8","#B198D6","#7FA8C4",
+    "#D98A94","#E8A3B8","#C1786F","#E38B6F","#E9A66B","#E3C063","#C9B458","#A6BF6A",
+    "#7CBF8E","#5DB3B8","#5A9FD6","#4F78B5","#C58FD0","#A8839B","#B08968","#8A9AA8"];
   var ALL_MONTHS = [1,2,3,4,5,6,7,8,9,10,11,12];
 
   function defaultData(){
@@ -897,14 +917,24 @@
   document.getElementById("hdrGear").addEventListener("click", function(){ goScreen("settings"); });
 
   /* ---------- Sub tabs ---------- */
-  document.querySelectorAll("nav.subtabs button").forEach(function(btn){
+  document.querySelectorAll("nav.subtabs button[data-sub]").forEach(function(btn){
     btn.addEventListener("click", function(){
-      document.querySelectorAll("nav.subtabs button").forEach(function(b){ b.classList.remove("active"); });
+      document.querySelectorAll("nav.subtabs button[data-sub]").forEach(function(b){ b.classList.remove("active"); });
       btn.classList.add("active");
       currentSub = btn.dataset.sub;
-      document.querySelectorAll(".subview").forEach(function(v){ v.classList.remove("active"); });
+      document.querySelectorAll("#screen-month .subview").forEach(function(v){ v.classList.remove("active"); });
       document.getElementById("sub-"+currentSub).classList.add("active");
       document.getElementById("monthFilterRow").style.display = (currentSub === "income") ? "none" : "flex";
+    });
+  });
+
+  /* ---------- Settings tabs ---------- */
+  document.querySelectorAll("nav.subtabs button[data-stab]").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      document.querySelectorAll("nav.subtabs button[data-stab]").forEach(function(b){ b.classList.remove("active"); });
+      btn.classList.add("active");
+      document.querySelectorAll("#screen-settings .subview").forEach(function(v){ v.classList.remove("active"); });
+      document.getElementById("stab-"+btn.dataset.stab).classList.add("active");
     });
   });
 
@@ -1047,6 +1077,7 @@
   }
 
   function openFixedForm(existing){
+    if(!existing) unanchorForm("formFixed");
     editingFixedId = existing ? existing.id : null;
     var card = document.getElementById("formFixed");
     card.innerHTML = fixedFormHtml(existing);
@@ -1079,6 +1110,7 @@
     });
   }
   function closeFixedForm(){
+    unanchorForm("formFixed");
     document.getElementById("formFixed").style.display = "none";
     document.getElementById("btnAddFixed").style.display = "block";
     editingFixedId = null;
@@ -1133,6 +1165,7 @@
   }
 
   function openVariableForm(existing){
+    if(!existing) unanchorForm("formVariable");
     editingVariableId = existing ? existing.id : null;
     var card = document.getElementById("formVariable");
     card.innerHTML = variableFormHtml(existing);
@@ -1164,6 +1197,7 @@
     });
   }
   function closeVariableForm(){
+    unanchorForm("formVariable");
     document.getElementById("formVariable").style.display = "none";
     document.getElementById("btnAddVariable").style.display = "block";
     editingVariableId = null;
@@ -1247,6 +1281,22 @@
     }
     return out;
   }
+  function importDupKey(date, name, amount){
+    return date + "|" + (name || "יובא מקובץ").trim() + "|" + Math.round(Number(amount)*100);
+  }
+  // Marks rows that already exist as variable expenses (same date, description and amount).
+  // Uses counts, so a file with two identical rows and one saved copy imports just the second.
+  function markImportDuplicates(rows){
+    var existing = {};
+    data.variableExpenses.forEach(function(e){
+      var k = importDupKey(e.date, e.name, e.amount);
+      existing[k] = (existing[k]||0) + 1;
+    });
+    rows.forEach(function(m){
+      var k = importDupKey(m.date, m.name, m.amount);
+      if(existing[k]){ m.dup = true; existing[k]--; }
+    });
+  }
   function renderImportPreview(){
     var colDate = Number(document.getElementById("imp-col-date").value);
     var colDesc = Number(document.getElementById("imp-col-desc").value);
@@ -1254,8 +1304,13 @@
     var mapped = buildMappedRows(colDate, colDesc, colAmount);
     var validRows = mapped.filter(function(m){ return m.valid; });
     var skipped = mapped.length - validRows.length;
+    markImportDuplicates(validRows);
+    var dups = validRows.filter(function(m){ return m.dup; }).length;
+    validRows = validRows.filter(function(m){ return !m.dup; });
     document.getElementById("imp-preview-count").textContent =
-      validRows.length + " עסקאות מוכנות לייבוא" + (skipped ? " · " + skipped + " שורות לא זוהו ויידלגו" : "");
+      validRows.length + " עסקאות מוכנות לייבוא" +
+      (dups ? " · " + dups + " כבר קיימות ויידלגו" : "") +
+      (skipped ? " · " + skipped + " שורות לא זוהו ויידלגו" : "");
     var box = document.getElementById("imp-preview-list");
     var html = "";
     validRows.slice(0,8).forEach(function(m){
@@ -1308,7 +1363,7 @@
     document.getElementById("imp-cancel").addEventListener("click", closeImportCard);
     document.getElementById("imp-confirm").addEventListener("click", function(){
       var validRows = renderImportPreview();
-      if(validRows.length === 0){ showToast("אין שורות תקינות לייבוא"); return; }
+      if(validRows.length === 0){ showToast("אין עסקאות חדשות לייבוא"); return; }
       var catId = document.getElementById("imp-cat").value;
       validRows.forEach(function(r){
         data.variableExpenses.push({ id:uid(), name:r.name || "יובא מקובץ", categoryId:catId, amount:r.amount, date:r.date, note:"" });
@@ -1360,6 +1415,7 @@
   }
 
   function openIncomeForm(existing){
+    if(!existing) unanchorForm("formIncome");
     editingIncomeId = existing ? existing.id : null;
     var card = document.getElementById("formIncome");
     card.innerHTML = incomeFormHtml(existing);
@@ -1387,6 +1443,7 @@
     });
   }
   function closeIncomeForm(){
+    unanchorForm("formIncome");
     document.getElementById("formIncome").style.display = "none";
     document.getElementById("btnAddIncome").style.display = "block";
     editingIncomeId = null;
@@ -1418,9 +1475,12 @@
   }
 
   function colorPickerHtml(selected){
+    var isCustom = selected && DEFAULT_COLORS.indexOf(selected) === -1;
     return DEFAULT_COLORS.map(function(c){
       return '<button type="button" class="swatch-btn'+(c===selected?' selected':'')+'" data-color="'+c+'" style="background:'+c+'"></button>';
-    }).join("");
+    }).join("") +
+      '<label class="swatch-btn swatch-custom'+(isCustom?' selected':'')+'" title="צבע אחר"'+(isCustom?' style="background:'+selected+'"':'')+'>'+
+        '<input type="color" id="cat-color-custom" value="'+(isCustom?selected:'#5FA98A')+'"></label>';
   }
 
   function catFormHtml(existing){
@@ -1437,6 +1497,7 @@
   }
 
   function openCatForm(existing){
+    if(!existing) unanchorForm("formCat");
     editingCatId = existing ? existing.id : null;
     var card = document.getElementById("formCat");
     card.innerHTML = catFormHtml(existing);
@@ -1445,10 +1506,18 @@
     var picker = document.getElementById("cat-color-picker");
     picker.addEventListener("click", function(ev){
       var btn = ev.target.closest(".swatch-btn");
-      if(!btn) return;
+      if(!btn || btn.classList.contains("swatch-custom")) return;
       picker.querySelectorAll(".swatch-btn").forEach(function(b){ b.classList.remove("selected"); });
       btn.classList.add("selected");
       picker.dataset.selected = btn.dataset.color;
+    });
+    var customInput = document.getElementById("cat-color-custom");
+    customInput.addEventListener("input", function(){
+      var lbl = customInput.parentNode;
+      picker.querySelectorAll(".swatch-btn").forEach(function(b){ b.classList.remove("selected"); });
+      lbl.classList.add("selected");
+      lbl.style.background = customInput.value;
+      picker.dataset.selected = customInput.value;
     });
     document.getElementById("cat-save").addEventListener("click", function(){
       var name = document.getElementById("cat-name").value.trim();
@@ -1476,6 +1545,7 @@
     });
   }
   function closeCatForm(){
+    unanchorForm("formCat");
     document.getElementById("formCat").style.display = "none";
     document.getElementById("btnAddCat").style.display = "block";
     editingCatId = null;
@@ -1682,6 +1752,7 @@
   }
 
   function openAnnualForm(existing){
+    if(!existing) unanchorForm("formAnnual");
     editingAnnualId = existing ? existing.id : null;
     var card = document.getElementById("formAnnual");
     card.innerHTML = annualFormHtml(existing);
@@ -1724,9 +1795,34 @@
     });
   }
   function closeAnnualForm(){
+    unanchorForm("formAnnual");
     document.getElementById("formAnnual").style.display = "none";
     document.getElementById("btnAddAnnual").style.display = "block";
     editingAnnualId = null;
+  }
+
+  /* ---------- Inline edit forms (open under the edited row) ---------- */
+  var FORM_ACTS = {"edit-fixed":"formFixed","edit-variable":"formVariable","edit-income":"formIncome","edit-cat":"formCat","edit-annual":"formAnnual"};
+  var formHomes = {}, formAnchors = {};
+  Object.keys(FORM_ACTS).forEach(function(act){
+    var card = document.getElementById(FORM_ACTS[act]);
+    formHomes[card.id] = {parent:card.parentNode, next:card.nextSibling};
+  });
+  function sendFormHome(cardId){
+    var card = document.getElementById(cardId), home = formHomes[cardId];
+    if(card.parentNode !== home.parent || card.nextSibling !== home.next) home.parent.insertBefore(card, home.next);
+  }
+  function placeFormUnderRow(act, id){
+    var cardId = FORM_ACTS[act];
+    var btn = document.querySelector('button[data-act="'+act+'"][data-id="'+id+'"]');
+    var row = btn && btn.closest(".row, .cat-row");
+    if(!row) return;
+    formAnchors[cardId] = {act:act, id:id};
+    row.parentNode.insertBefore(document.getElementById(cardId), row.nextSibling);
+  }
+  function unanchorForm(cardId){
+    delete formAnchors[cardId];
+    sendFormHome(cardId);
   }
 
   /* ---------- Global click delegation ---------- */
@@ -1735,6 +1831,16 @@
     if(!btn) return;
     var act = btn.dataset.act;
     var id = btn.dataset.id;
+    if(FORM_ACTS[act]){
+      handleRowAction(act, id);
+      placeFormUnderRow(act, id);
+      var card = document.getElementById(FORM_ACTS[act]);
+      if(card.scrollIntoView) card.scrollIntoView({behavior:"smooth", block:"nearest"});
+      return;
+    }
+    handleRowAction(act, id);
+  });
+  function handleRowAction(act, id){
 
     if(act==="edit-fixed"){ openFixedForm(data.fixedExpenses.find(function(x){return x.id===id;})); }
     else if(act==="del-fixed"){
@@ -1771,7 +1877,7 @@
         save(); renderAll(); showToast("נמחק");
       }
     }
-  });
+  }
 
   /* ---------- Month / Year nav ---------- */
   function stepMonth(delta){
@@ -1818,12 +1924,16 @@
 
   /* ---------- Init ---------- */
   function renderAll(){
+    if(formHomes) Object.keys(formHomes).forEach(sendFormHome);
     renderHomeStats();
     if(currentScreen === "month"){ renderMonthFilter(); renderMonthHeader(); renderFixed(); renderVariable(); renderIncome(); }
     if(currentScreen === "history"){ renderHistory(); }
     if(currentScreen === "annual"){ renderAnnual(); }
     if(currentScreen === "annualexp"){ renderAnnualExpenses(); }
     if(currentScreen === "settings"){ renderCategories(); }
+    if(formAnchors) Object.keys(formAnchors).forEach(function(cardId){
+      placeFormUnderRow(formAnchors[cardId].act, formAnchors[cardId].id);
+    });
   }
 })();
 </script>
