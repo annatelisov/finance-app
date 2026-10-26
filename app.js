@@ -48,6 +48,7 @@
       if(!snap.exists) return;
       var hdata = snap.data();
       data = normalizeData(hdata.data || {});
+      syncBudgetNow();
       renderHouseholdInfo(hdata);
       document.getElementById("loadingScreen").style.display = "none";
       document.getElementById("onboardScreen").style.display = "none";
@@ -230,7 +231,8 @@
       fixedExpenses: [],
       variableExpenses: [],
       annualExpenses: [],
-      incomes: []
+      incomes: [],
+      settings: { monthStartDay: 10 }
     };
   }
 
@@ -243,6 +245,8 @@
     if(!parsed.variableExpenses) parsed.variableExpenses = [];
     if(!parsed.annualExpenses) parsed.annualExpenses = [];
     if(!parsed.incomes) parsed.incomes = [];
+    if(!parsed.settings) parsed.settings = {};
+    if(!parsed.settings.monthStartDay) parsed.settings.monthStartDay = 10;
     parsed.fixedExpenses.forEach(function(e){ if(!e.months) e.months = ALL_MONTHS.slice(); });
     return parsed;
   }
@@ -258,15 +262,29 @@
   var data = defaultData();
 
   /* ---------- State ---------- */
-  // A budget month runs from day BUDGET_START_DAY of the month until the day before it next month
-  // (e.g. September = 10.9 – 9.10), so dates before the 10th belong to the previous month.
-  var BUDGET_START_DAY = 10;
+  // A budget month runs from its start day until the day before it next month
+  // (start day 10: September = 10.9 – 9.10, so dates before the 10th belong to the previous month;
+  // start day 1: a regular calendar month). Set per household in Settings.
+  function budgetStartDay(){ return (data.settings && Number(data.settings.monthStartDay)) || 10; }
   var today = new Date();
-  var budgetNowYear = today.getFullYear();
-  var budgetNowMonth = today.getMonth(); // 0-11
-  if(today.getDate() < BUDGET_START_DAY){
-    budgetNowMonth--;
-    if(budgetNowMonth < 0){ budgetNowMonth = 11; budgetNowYear--; }
+  var budgetNowYear, budgetNowMonth; // 0-11
+  function computeBudgetNow(){
+    budgetNowYear = today.getFullYear();
+    budgetNowMonth = today.getMonth();
+    if(today.getDate() < budgetStartDay()){
+      budgetNowMonth--;
+      if(budgetNowMonth < 0){ budgetNowMonth = 11; budgetNowYear--; }
+    }
+  }
+  computeBudgetNow();
+  // Recomputes "now" after the month start day may have changed; views still showing the old "now" follow it.
+  function syncBudgetNow(){
+    var oldY = budgetNowYear, oldM = budgetNowMonth;
+    computeBudgetNow();
+    if(oldY === budgetNowYear && oldM === budgetNowMonth) return;
+    if(viewYear === oldY && viewMonth === oldM){ viewYear = budgetNowYear; viewMonth = budgetNowMonth; }
+    if(historyYear === oldY && historySelectedMonth === oldM+1){ historyYear = budgetNowYear; historySelectedMonth = budgetNowMonth+1; }
+    if(annualYear === oldY){ annualYear = budgetNowYear; }
   }
   var viewYear = budgetNowYear;
   var viewMonth = budgetNowMonth; // 0-11, "this month" screen
@@ -283,6 +301,9 @@
   var monthCatFilter = "";
   var annualCatFilter = "";
   var historyCatFilter = "";
+  var monthSearch = "";
+  var monthDateFrom = "";
+  var monthDateTo = "";
 
   var HE_MONTHS = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
   var HE_MONTHS_SHORT = ["ינו","פבר","מרץ","אפר","מאי","יונ","יול","אוג","ספט","אוק","נוב","דצמ"];
@@ -293,13 +314,15 @@
   // "YYYY-MM-DD" -> budget month key "YYYY-MM"
   function budgetKeyForDate(dateStr){
     var y = Number(dateStr.slice(0,4)), m = Number(dateStr.slice(5,7)) - 1, d = Number(dateStr.slice(8,10));
-    if(d < BUDGET_START_DAY){ m--; if(m < 0){ m = 11; y--; } }
+    if(d < budgetStartDay()){ m--; if(m < 0){ m = 11; y--; } }
     return monthKey(y, m);
   }
   function inBudgetMonth(e, key){ return !!e.date && budgetKeyForDate(e.date) === key; }
-  // e.g. "10.9 – 9.10"
-  function budgetRangeLabel(m){
-    return BUDGET_START_DAY + "." + (m+1) + " – " + (BUDGET_START_DAY-1) + "." + ((m+1)%12+1);
+  // e.g. "10.9 – 9.10", or "1.9 – 30.9" for calendar months
+  function budgetRangeLabel(y, m){
+    var start = budgetStartDay();
+    if(start === 1) return "1." + (m+1) + " – " + new Date(y, m+1, 0).getDate() + "." + (m+1);
+    return start + "." + (m+1) + " – " + (start-1) + "." + ((m+1)%12+1);
   }
   function escapeHtml(s){ var d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
 
@@ -407,7 +430,8 @@
       currentSub = btn.dataset.sub;
       document.querySelectorAll("#screen-month .subview").forEach(function(v){ v.classList.remove("active"); });
       document.getElementById("sub-"+currentSub).classList.add("active");
-      document.getElementById("monthFilterRow").style.display = (currentSub === "income") ? "none" : "flex";
+      updateFilterPanelVisibility();
+      renderFilterTotal();
     });
   });
 
@@ -418,6 +442,21 @@
       btn.classList.add("active");
       document.querySelectorAll("#screen-settings .subview").forEach(function(v){ v.classList.remove("active"); });
       document.getElementById("stab-"+btn.dataset.stab).classList.add("active");
+    });
+  });
+
+  /* ---------- Month start setting ---------- */
+  function renderMonthStartSetting(){
+    var current = String(budgetStartDay());
+    document.querySelectorAll('input[name="monthStart"]').forEach(function(r){ r.checked = r.value === current; });
+  }
+  document.querySelectorAll('input[name="monthStart"]').forEach(function(r){
+    r.addEventListener("change", function(){
+      if(!r.checked) return;
+      data.settings.monthStartDay = Number(r.value);
+      syncBudgetNow();
+      save(); renderAll();
+      showToast("נשמר");
     });
   });
 
@@ -439,7 +478,7 @@
   /* ---------- This month screen ---------- */
   function renderMonthHeader(){
     document.getElementById("monthLabel").innerHTML = HE_MONTHS[viewMonth] + " " + viewYear +
-      ' <span style="font-size:12px; font-weight:400; opacity:.7; white-space:nowrap;">(' + budgetRangeLabel(viewMonth) + ')</span>';
+      ' <span style="font-size:12px; font-weight:400; opacity:.7; white-space:nowrap;">(' + budgetRangeLabel(viewYear, viewMonth) + ')</span>';
     var fixedTot = fixedTotalForMonth1(viewYear, viewMonth+1);
     var annualTot = annualContributionForMonth(viewYear, viewMonth+1);
     var varTot = variableTotalForMonth(viewYear, viewMonth);
@@ -457,16 +496,66 @@
     remEl.classList.toggle("negative", remaining < 0);
   }
 
+  // Filters are hidden on the income tab; the date range only applies to variable expenses.
+  function updateFilterPanelVisibility(){
+    document.getElementById("monthFilterRow").style.display = (currentSub === "income") ? "none" : "block";
+    document.getElementById("monthDateFilterRow").style.display = (currentSub === "variable") ? "flex" : "none";
+    var active = monthSearch || monthCatFilter || monthDateFrom || monthDateTo;
+    document.getElementById("monthFilterClear").style.display = active ? "inline-block" : "none";
+  }
+  function matchesMonthSearch(e){
+    if(!monthSearch) return true;
+    var q = monthSearch.toLowerCase();
+    var cat = getCat(e.categoryId);
+    return [e.name, e.note, cat && cat.name].some(function(s){ return s && String(s).toLowerCase().indexOf(q) !== -1; });
+  }
+  function dateFilterActive(){ return !!(monthDateFrom || monthDateTo); }
+  function inDateFilter(e){
+    if(!e.date) return false;
+    if(monthDateFrom && e.date < monthDateFrom) return false;
+    if(monthDateTo && e.date > monthDateTo) return false;
+    return true;
+  }
+  function refreshMonthLists(){ updateFilterPanelVisibility(); renderFixed(); renderVariable(); }
+
+  // Count and sum of what each list currently shows, for the filter total row.
+  var filteredTotals = { fixed:{count:0, sum:0}, variable:{count:0, sum:0} };
+  function setFilteredTotal(sub, items){
+    filteredTotals[sub] = { count:items.length, sum:items.reduce(function(s,e){ return s + Number(e.amount||0); }, 0) };
+    renderFilterTotal();
+  }
+  function renderFilterTotal(){
+    var el = document.getElementById("monthFilterTotal");
+    var active = monthSearch || monthCatFilter || (currentSub === "variable" && dateFilterActive());
+    var t = filteredTotals[currentSub];
+    if(!active || !t){ el.style.display = "none"; return; }
+    el.innerHTML = '<span>סה״כ בסינון · ' + t.count + ' פריטים</span><span class="sum">' + money(t.sum) + '</span>';
+    el.style.display = "flex";
+  }
+
   var monthFilterWired = false;
   function renderMonthFilter(){
     var sel = document.getElementById("monthCatFilter");
     monthCatFilter = populateCatFilterSelect(sel, monthCatFilter);
-    document.getElementById("monthFilterRow").style.display = (currentSub === "income") ? "none" : "flex";
+    updateFilterPanelVisibility();
     if(!monthFilterWired){
       monthFilterWired = true;
       sel.addEventListener("change", function(){
         monthCatFilter = sel.value;
-        renderFixed(); renderVariable();
+        refreshMonthLists();
+      });
+      var search = document.getElementById("monthSearch");
+      search.addEventListener("input", function(){
+        monthSearch = search.value.trim();
+        refreshMonthLists();
+      });
+      var from = document.getElementById("monthDateFrom"), to = document.getElementById("monthDateTo");
+      from.addEventListener("change", function(){ monthDateFrom = from.value; refreshMonthLists(); });
+      to.addEventListener("change", function(){ monthDateTo = to.value; refreshMonthLists(); });
+      document.getElementById("monthFilterClear").addEventListener("click", function(){
+        monthSearch = monthCatFilter = monthDateFrom = monthDateTo = "";
+        search.value = sel.value = from.value = to.value = "";
+        refreshMonthLists();
       });
     }
   }
@@ -481,10 +570,12 @@
     var list = document.getElementById("fixedList");
     var items = data.fixedExpenses.filter(function(e){ return fixedStarted(e, viewYear, viewMonth+1); });
     if(monthCatFilter){ items = items.filter(function(e){ return e.categoryId===monthCatFilter; }); }
+    items = items.filter(matchesMonthSearch);
+    setFilteredTotal("fixed", items);
     document.getElementById("fixedCount").textContent = items.length ? (items.length + " פריטים") : "";
     if(items.length === 0){
-      var msg = monthCatFilter
-        ? '<div class="empty"><span class="big">🔍</span>אין הוצאות קבועות בקטגוריה זו.</div>'
+      var msg = (monthCatFilter || monthSearch)
+        ? '<div class="empty"><span class="big">🔍</span>לא נמצאו הוצאות קבועות שמתאימות לסינון.</div>'
         : '<div class="empty"><span class="big">🗒️</span>עדיין אין הוצאות קבועות.<br>הוסיפי את הראשונה — שכר דירה, חשמל, אינטרנט וכו׳.</div>';
       list.innerHTML = msg;
       return;
@@ -626,14 +717,19 @@
   function renderVariable(){
     var list = document.getElementById("variableList");
     var key = monthKey(viewYear, viewMonth);
+    // With a date range set, show matches from any month rather than just the viewed one.
+    var byDate = dateFilterActive();
     var items = data.variableExpenses
-      .filter(function(e){ return inBudgetMonth(e, key); })
+      .filter(function(e){ return byDate ? inDateFilter(e) : inBudgetMonth(e, key); })
       .filter(function(e){ return !monthCatFilter || e.categoryId===monthCatFilter; })
+      .filter(matchesMonthSearch)
       .sort(function(a,b){ return b.date.localeCompare(a.date); });
+    var filtered = byDate || monthCatFilter || monthSearch;
+    setFilteredTotal("variable", items);
     document.getElementById("variableCount").textContent = items.length ? (items.length + " פריטים") : "";
     if(items.length === 0){
-      var msg = monthCatFilter
-        ? '<div class="empty"><span class="big">🔍</span>אין הוצאות משתנות בקטגוריה זו לחודש '+HE_MONTHS[viewMonth]+'.</div>'
+      var msg = filtered
+        ? '<div class="empty"><span class="big">🔍</span>לא נמצאו הוצאות משתנות שמתאימות לסינון'+(byDate ? '' : ' בחודש '+HE_MONTHS[viewMonth])+'.</div>'
         : '<div class="empty"><span class="big">🧺</span>אין עדיין הוצאות משתנות לחודש '+HE_MONTHS[viewMonth]+'.<br>הוסיפי קניה, דלק, יציאה וכו׳.</div>';
       list.innerHTML = msg;
       return;
@@ -642,7 +738,7 @@
     items.forEach(function(e){
       var cat = getCat(e.categoryId);
       html += '<div class="row">';
-      html += '<span class="date">'+e.date.slice(8,10)+'/'+e.date.slice(5,7)+'</span>';
+      html += '<span class="date">'+e.date.slice(8,10)+'/'+e.date.slice(5,7)+(byDate ? '/'+e.date.slice(2,4) : '')+'</span>';
       html += '<span class="name"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+(cat?cat.color:'#999')+';margin-inline-end:6px;"></span>'+escapeHtml(e.name || (cat?cat.name:'הוצאה'))+(e.note?'<span class="note">'+escapeHtml(e.note)+'</span>':'')+'</span>';
       html += '<span class="amount">'+money(e.amount)+'</span>';
       html += '<span class="actions">';
@@ -655,11 +751,11 @@
 
   function variableFormHtml(existing){
     var isEdit = !!existing;
-    // New expense: today if viewing the current budget month, otherwise the month's first day (the 10th)
+    // New expense: today if viewing the current budget month, otherwise the budget month's first day
     var isCurrentBudgetMonth = viewYear === budgetNowYear && viewMonth === budgetNowMonth;
     var defaultDate = isEdit ? existing.date : (isCurrentBudgetMonth
       ? today.getFullYear()+"-"+String(today.getMonth()+1).padStart(2,"0")+"-"+String(today.getDate()).padStart(2,"0")
-      : monthKey(viewYear, viewMonth)+"-"+String(BUDGET_START_DAY).padStart(2,"0"));
+      : monthKey(viewYear, viewMonth)+"-"+String(budgetStartDay()).padStart(2,"0"));
     return '<h3>'+(isEdit? 'עריכת הוצאה' : 'הוצאה משתנה חדשה')+'</h3>'+
       '<div class="field"><label>תיאור</label><input type="text" id="vx-name" placeholder="לדוגמה: סופר, דלק..." value="'+(isEdit?escapeHtml(existing.name||''):'')+'"></div>'+
       '<div class="field"><label>קטגוריה</label><select id="vx-cat">'+catOptionsHtml(isEdit?existing.categoryId:data.categories[0] && data.categories[0].id)+'</select></div>'+
@@ -813,11 +909,18 @@
     var mapped = buildMappedRows(colDate, colDesc, colAmount);
     var validRows = mapped.filter(function(m){ return m.valid; });
     var skipped = mapped.length - validRows.length;
+    var fromDate = document.getElementById("imp-from-date").value;
+    var beforeFrom = 0;
+    if(fromDate){
+      beforeFrom = validRows.filter(function(m){ return m.date < fromDate; }).length;
+      validRows = validRows.filter(function(m){ return m.date >= fromDate; });
+    }
     markImportDuplicates(validRows);
     var dups = validRows.filter(function(m){ return m.dup; }).length;
     validRows = validRows.filter(function(m){ return !m.dup; });
     document.getElementById("imp-preview-count").textContent =
       validRows.length + " עסקאות מוכנות לייבוא" +
+      (beforeFrom ? " · " + beforeFrom + " לפני התאריך שנבחר ויידלגו" : "") +
       (dups ? " · " + dups + " כבר קיימות ויידלגו" : "") +
       (skipped ? " · " + skipped + " שורות לא זוהו ויידלגו" : "");
     var box = document.getElementById("imp-preview-list");
@@ -855,6 +958,8 @@
       '<div class="field"><label>עמודת תאריך</label><select id="imp-col-date">'+colOptions(guessDate)+'</select></div>'+
       '<div class="field"><label>עמודת תיאור</label><select id="imp-col-desc">'+colOptions(guessDesc)+'</select></div>'+
       '<div class="field"><label>עמודת סכום</label><select id="imp-col-amount">'+colOptions(guessAmount)+'</select></div>'+
+      '<div class="field"><label>ייבוא מתאריך (לא חובה)</label><input type="date" id="imp-from-date">'+
+        '<p class="hint">רק עסקאות מהתאריך הזה והלאה ייובאו. השאירו ריק כדי לייבא הכל.</p></div>'+
       '<div class="field"><label>קטגוריה לכל הפריטים המיובאים</label><select id="imp-cat">'+catOptionsHtml(data.categories[0] && data.categories[0].id)+'</select></div>'+
       '<div class="hint" id="imp-preview-count"></div>'+
       '<div class="import-preview" id="imp-preview-list"></div>'+
@@ -864,7 +969,7 @@
       '</div>';
     card.style.display = "block";
 
-    ["imp-col-date","imp-col-desc","imp-col-amount"].forEach(function(id){
+    ["imp-col-date","imp-col-desc","imp-col-amount","imp-from-date"].forEach(function(id){
       document.getElementById(id).addEventListener("change", renderImportPreview);
     });
     renderImportPreview();
@@ -1439,7 +1544,7 @@
     if(currentScreen === "history"){ renderHistory(); }
     if(currentScreen === "annual"){ renderAnnual(); }
     if(currentScreen === "annualexp"){ renderAnnualExpenses(); }
-    if(currentScreen === "settings"){ renderCategories(); }
+    if(currentScreen === "settings"){ renderCategories(); renderMonthStartSetting(); }
     if(formAnchors) Object.keys(formAnchors).forEach(function(cardId){
       placeFormUnderRow(formAnchors[cardId].act, formAnchors[cardId].id);
     });

@@ -119,9 +119,20 @@
         <button data-sub="income">הכנסות</button>
       </nav>
 
-      <div class="filter-row" id="monthFilterRow">
-        <label for="monthCatFilter">סינון לפי קטגוריה</label>
-        <select id="monthCatFilter"></select>
+      <div class="filter-panel" id="monthFilterRow">
+        <input type="search" id="monthSearch" class="filter-search" placeholder="🔍 חיפוש לפי תיאור או הערה">
+        <div class="filter-row">
+          <label for="monthCatFilter">קטגוריה</label>
+          <select id="monthCatFilter"></select>
+        </div>
+        <div class="filter-row" id="monthDateFilterRow">
+          <label for="monthDateFrom">מתאריך</label>
+          <input type="date" id="monthDateFrom">
+          <label for="monthDateTo">עד</label>
+          <input type="date" id="monthDateTo">
+        </div>
+        <div class="filter-total" id="monthFilterTotal" style="display:none;"></div>
+        <button type="button" class="filter-clear" id="monthFilterClear" style="display:none;">✕ ניקוי סינון</button>
       </div>
 
       <div class="subview active" id="sub-fixed">
@@ -203,6 +214,7 @@
     <section class="screen" id="screen-settings">
       <nav class="subtabs">
         <button data-stab="cats" class="active">קטגוריות</button>
+        <button data-stab="month">חודש תקציבי</button>
         <button data-stab="home">משק הבית</button>
         <button data-stab="account">חשבון</button>
       </nav>
@@ -212,6 +224,15 @@
         <div id="catList"></div>
         <button class="add-btn" id="btnAddCat">+ קטגוריה חדשה</button>
         <div class="form-card" id="formCat" style="display:none;"></div>
+      </div>
+
+      <div class="subview" id="stab-month">
+        <div class="section-head"><h2>מתי מתחיל חודש</h2></div>
+        <div class="form-card" style="margin-top:0;">
+          <label class="radio-opt"><input type="radio" name="monthStart" value="1"><span><b>מה-1 לחודש עד סוף החודש</b><span class="hint">לדוגמה: אוקטובר = 1.10 – 31.10</span></span></label>
+          <label class="radio-opt"><input type="radio" name="monthStart" value="10"><span><b>מה-10 לחודש עד ה-9 בחודש הבא</b><span class="hint">לדוגמה: אוקטובר = 10.10 – 9.11</span></span></label>
+          <p class="hint">ההגדרה משותפת לכל חברי משק הבית, וקובעת לאיזה חודש שייכת כל הוצאה משתנה לפי התאריך שלה.</p>
+        </div>
       </div>
 
       <div class="subview" id="stab-home">
